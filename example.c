@@ -4,6 +4,7 @@
 
 int main(int argc, char const *argv[])
 {
+    printf("Hello");
     // initialise the MeMS system 
     mems_init();
     int* ptr[10];
