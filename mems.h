@@ -202,6 +202,33 @@ Returns: Nothing but should print the necessary information on STDOUT
 */
 void mems_print_stats(){
 
+    int usedPages = 0;
+    int unusedMemory = 0;
+
+    // Iterate through the Main Chain.
+    MainChainNode* current_mainNode = mainchain;
+    while (current_mainNode != NULL) {
+        // Iterate through the Sub Chain.
+        SubChainNode* current_subNode = current_mainNode->sub_chain;
+        while (current_subNode != NULL) {
+            if (current_subNode->is_mapped) {
+                // This is a used page (PROCESS).
+                usedPages += current_subNode->size / PAGE_SIZE;
+            } else {
+                // This is an unused memory (HOLE).
+                unusedMemory += current_subNode->size;
+            }
+            current_subNode = current_subNode->next;
+        }
+
+        // Print details about the Main Chain node.
+        printf("Main Chain Node - Memory Size: %d\n", current_mainNode->memory_size);
+        current_mainNode = current_mainNode->next;
+    }
+
+    // Print the statistics.
+    printf("Used Pages: %d\n", usedPages);
+    printf("Unused Memory: %d bytes\n", unusedMemory);
 
 }
 
@@ -212,7 +239,22 @@ Parameter: MeMS Virtual address (that is created by MeMS)
 Returns: MeMS physical address mapped to the passed ptr (MeMS virtual address).
 */
 void *mems_get(void*v_ptr){
-    
+
+    MainChainNode* current_mainNode = mainchain;
+    while (current_mainNode != NULL) {
+        SubChainNode* current_subNode = current_mainNode->sub_chain;
+        while (current_subNode != NULL) {
+            if (current_subNode->address == v_ptr) {
+                // This virtual address matches. Return the MeMS physical address.
+                return v_ptr;  // In this simplified example, the virtual address is treated as the physical address.
+                // In a real implementation, you might have a mapping from virtual to physical addresses.
+            }
+            current_subNode = current_subNode->next;
+        }
+        current_mainNode = current_mainNode->next;
+    }
+
+    return NULL;
 }
 
 
@@ -223,4 +265,17 @@ Returns: nothing
 */
 void mems_free(void *v_ptr){
     
+    MainChainNode* current_mainNode = mainchain;
+    while (current_mainNode != NULL) {
+        SubChainNode* current_subNode = current_mainNode->sub_chain;
+        while (current_subNode != NULL) {
+            if (current_subNode->address == v_ptr && current_subNode->is_mapped) {
+                // This virtual address matches and is marked as mapped. Mark it as unmapped (HOLE).
+                current_subNode->is_mapped = 0;
+                return;  // The memory has been freed successfully.
+            }
+            current_subNode = current_subNode->next;
+        }
+        current_mainNode = current_mainNode->next;
+    }
 }
