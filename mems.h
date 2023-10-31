@@ -11,7 +11,8 @@ REFER DOCUMENTATION FOR MORE DETAILS ON FUNSTIONS AND THEIR FUNCTIONALITY
 // add other headers as required
 #include<stdio.h>
 #include<stdlib.h>
-
+#include <sys/mman.h>
+#include<unistd.h>
 
 /*
 Use this macro where ever you need PAGE_SIZE.
@@ -21,6 +22,28 @@ macro to make the output of all system same and conduct a fair evaluation.
 #define PAGE_SIZE 4096
 
 
+/* 
+Making the free list structure 
+*/
+
+struct MainChainNode {
+    int memory_size;
+    SubChainNode *sub_chain;
+    struct MainChainNode* next;
+    struct MainChainNode* prev;
+};
+
+struct SubChainNode {
+    void* address;
+    size_t size;
+    int is_mapped;
+    struct SubChainNode *prev;
+    struct SubChainNode *next;
+};
+
+struct MainChainNode* mainchain = NULL;
+void* mems_heap_start = NULL;
+
 /*
 Initializes all the required parameters for the MeMS system. The main parameters to be initialized are:
 1. the head of the free list i.e. the pointer that points to the head of the free list
@@ -29,10 +52,26 @@ Initializes all the required parameters for the MeMS system. The main parameters
 Input Parameter: Nothing
 Returns: Nothing
 */
-void mems_init(){
+
+void mems_init() {
+
+    mainchain = (struct MainChainNode*)mmap(NULL, sizeof(struct MainChainNode), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+    if (mainchain != MAP_FAILED) {
+        // Initialize the Main Chain attributes.
+        mainchain->memory_size = sizeof(struct MainChainNode); // Set the size dynamically.
+        mainchain->sub_chain = NULL; // No sub-chain nodes initially.
+        mainchain->next = NULL; // No next node initially.
+        mainchain->prev = NULL; // No previous node initially.
+
+        // Set the starting MeMS virtual address.
+        mems_heap_start = (void*)0;
+
+    } else {
+        printf("Error");
+    }
 
 }
-
 
 /*
 This function will be called at the end of the MeMS system and its main job is to unmap the 
@@ -41,6 +80,28 @@ Input Parameter: Nothing
 Returns: Nothing
 */
 void mems_finish(){
+
+    // You should traverse the Main Chain (free list) and unmap any memory segments that were allocated using mmap.
+    // This function should release all the memory allocated by your MeMS system.
+    MainChainNode* current_mainNode = mainchain;
+
+    while (current_mainNode != NULL) {
+        SubChainNode* current_subNode = current_mainNode->sub_chain;
+
+        while (current_subNode != NULL) {
+            if (current_subNode->is_mapped) {
+                // Unmap the memory segment allocated by mmap.
+                munmap(current_subNode->address, current_subNode->size);
+            }
+
+            current_subNode = current_subNode->next;
+        }
+
+        // Move to the next Main Chain node.
+        current_mainNode = current_mainNode->next;
+    }
+
+    // Clean up any other resources or data structures used by your MeMS system.
     
 }
 
@@ -57,10 +118,79 @@ by adding it to the free list.
 Parameter: The size of the memory the user program wants
 Returns: MeMS Virtual address (that is created by MeMS)
 */ 
-void* mems_malloc(size_t size){
 
+void* mems_malloc(size_t size) {
+    
+    // Check if there is a sufficiently large segment in the free list.
+    MainChainNode* current_mainNode = mainchain;
+    while (current_mainNode != NULL) {
+        SubChainNode* current_subNode = current_mainNode->sub_chain;
+        while (current_subNode != NULL) {
+            if (!current_subNode->is_mapped && current_subNode->size >= size) {
+                // Reuse this segment.
+                current_subNode->is_mapped = 1; // Mark it as mapped.
+                return current_subNode->address; // Return the MeMS virtual address.
+            }
+            current_subNode = current_subNode->next;
+        }
+        current_mainNode = current_mainNode->next;
+    }
+
+    // If no segment is available, use mmap to allocate more memory.
+    void* address = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (address != MAP_FAILED) {
+        // Update the free list with the new segment.
+        // Create a new Main Chain node if needed.
+        if (mainchain == NULL) {
+            mainchain = (MainChainNode*) address;
+            mainchain->next = NULL;
+            mainchain->prev = NULL;
+            mainchain->sub_chain = NULL;
+            mainchain->memory_size = size; // Set the total memory size (adjust if needed).
+        } else {
+            // Traverse the Main Chain to find the last node.
+            current_mainNode = mainchain;
+            while (current_mainNode->next != NULL) {
+                current_mainNode = current_mainNode->next;
+            }
+            
+            // Create a new Main Chain node.
+            MainChainNode* new_mainNode = (MainChainNode*) address;
+            new_mainNode->next = NULL;
+            new_mainNode->prev = current_mainNode;
+            new_mainNode->sub_chain = NULL;
+            new_mainNode->memory_size = size; // Set the total memory size (adjust if needed).
+            
+            // Link it to the last node in the Main Chain.
+            current_mainNode->next = new_mainNode;
+        }
+
+        // Create a new Sub Chain node for the allocated segment.
+        SubChainNode* new_subNode = (SubChainNode*)(address + sizeof(MainChainNode));
+        new_subNode->address = address + sizeof(MainChainNode);
+        new_subNode->size = size;
+        new_subNode->is_mapped = 1; // Mark it as mapped.
+        new_subNode->prev = NULL;
+        new_subNode->next = NULL;
+
+        // Link it to the Main Chain node's sub chain.
+        if (current_mainNode->sub_chain == NULL) {
+            current_mainNode->sub_chain = new_subNode;
+        } else {
+            SubChainNode* current_subNode = current_mainNode->sub_chain;
+            while (current_subNode->next != NULL) {
+                current_subNode = current_subNode->next;
+            }
+            current_subNode->next = new_subNode;
+            new_subNode->prev = current_subNode;
+        }
+
+        // Return the MeMS virtual address.
+        return new_subNode->address;
+    }
+
+    return NULL; // Handle the case where memory allocation using mmap failed.
 }
-
 
 /*
 this function print the stats of the MeMS system like
@@ -71,6 +201,7 @@ Parameter: Nothing
 Returns: Nothing but should print the necessary information on STDOUT
 */
 void mems_print_stats(){
+
 
 }
 
