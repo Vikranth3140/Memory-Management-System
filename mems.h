@@ -21,7 +21,7 @@ macro to make the output of all system same and conduct a fair evaluation.
 */
 #define PAGE_SIZE 4096
 
-/Making the free list structure/
+/* Making the free list structure */
 
 struct Segment {
     int type;  // 1 for process, 0 for hole
