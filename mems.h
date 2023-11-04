@@ -24,8 +24,8 @@ macro to make the output of all system same and conduct a fair evaluation.
 /Making the free list structure/
 
 struct Segment {
-    int hole;
-    int process;
+    int type;  // 1 for process, 0 for hole
+    int size;
     struct Segment* prev;
     struct Segment* next;
     struct Node* mainNode;
@@ -71,18 +71,18 @@ void appendNode(int size) {
     }
 }
 
-struct Segment* createSegment(struct Node* node, int process, int hole) {
+void appendSegment(struct Node* node, int type, int size) {
     struct Segment* newSegment = mmap(NULL, sizeof(struct Segment), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (newSegment == MAP_FAILED) {
         perror("mmap failed");
         exit(1);
     }
 
-    newSegment->process = process;
-    newSegment->hole = hole;
+    newSegment->type = type;
     newSegment->mainNode = node;
     newSegment->prev = NULL;
     newSegment->next = NULL;
+    newSegment->size = size;
 
     if (node->segment == NULL) {
         node->segment = newSegment;
@@ -94,8 +94,6 @@ struct Segment* createSegment(struct Node* node, int process, int hole) {
         current->next = newSegment;
         newSegment->prev = current;
     }
-
-    return newSegment;
 }
 
 /*
@@ -107,6 +105,13 @@ Input Parameter: Nothing
 Returns: Nothing
 */
 void mems_init(){
+
+	mainChain = (struct MainChain*)mmap(NULL, sizeof(struct MainChain), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (mainChain == MAP_FAILED) {
+        perror("mmap failed");
+        exit(1);
+    }
+    mainChain->head = NULL;
 
 }
 
@@ -134,8 +139,55 @@ by adding it to the free list.
 Parameter: The size of the memory the user program wants
 Returns: MeMS Virtual address (that is created by MeMS)
 */ 
-void* mems_malloc(size_t size){
 
+void* mems_malloc(size_t size) {
+
+    size_t total_size = size * PAGE_SIZE;
+    struct Node* currentNode = mainChain->head;
+
+    while (currentNode) {
+        struct Segment* currentSegment = currentNode->segment;
+
+        while (currentSegment) {
+            if (currentSegment->type == 0 && currentSegment->size >= total_size) {
+                
+                size_t remaining_hole = currentSegment->size - total_size;
+
+                if (remaining_hole > 0) {
+                    
+                    createSegment(currentNode, 0, remaining_hole);
+                }
+
+                
+                if (currentSegment->prev) {
+                    currentSegment->prev->next = currentSegment->next;
+                } else {
+                    currentNode->segment = currentSegment->next;
+                }
+                if (currentSegment->next) {
+                    currentSegment->next->prev = currentSegment->prev;
+                }
+
+                
+                createSegment(currentNode, 1, total_size);
+
+                return currentSegment->mainNode->segment;
+            }
+
+            currentSegment = currentSegment->next;
+        }
+
+        if (currentNode->next == NULL) {
+            
+            currentNode->next = createNode(size);
+            currentNode->next->prev = currentNode;
+            return currentNode->next->segment;
+        }
+
+        currentNode = currentNode->next;
+    }
+
+    return NULL; 
 }
 
 
@@ -148,6 +200,8 @@ Parameter: Nothing
 Returns: Nothing but should print the necessary information on STDOUT
 */
 void mems_print_stats(){
+
+	
 
 }
 
