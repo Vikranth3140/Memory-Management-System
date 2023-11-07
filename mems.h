@@ -43,6 +43,7 @@ struct MainChain {
 };
 
 struct MainChain* mainChain;
+size_t memsVirtualOffset = 0;
 
 struct Node* createNode(int size) {
     struct Node* newNode = mmap(NULL, sizeof(struct Node), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -112,7 +113,6 @@ void mems_init(){
         exit(1);
     }
     mainChain->head = NULL;
-
 }
 
 
@@ -141,8 +141,18 @@ Returns: MeMS Virtual address (that is created by MeMS)
 */ 
 
 void* mems_malloc(size_t size) {
+    void* memsVirtualAddress = NULL;
+    size_t total_size = size;
 
-    size_t total_size = size * PAGE_SIZE;
+    if (mainChain->head == NULL) {
+        mainChain->head = createNode(total_size);
+        appendSegment(mainChain->head, 0, total_size);
+        memsVirtualAddress = (void*)memsVirtualOffset;
+        memsVirtualOffset += total_size;
+        appendSegment(mainChain->head, 1, total_size);
+        return memsVirtualAddress;
+    }
+
     struct Node* currentNode = mainChain->head;
 
     while (currentNode) {
@@ -150,15 +160,12 @@ void* mems_malloc(size_t size) {
 
         while (currentSegment) {
             if (currentSegment->type == 0 && currentSegment->size >= total_size) {
-                
                 size_t remaining_hole = currentSegment->size - total_size;
 
                 if (remaining_hole > 0) {
-                    
-                    createSegment(currentNode, 0, remaining_hole);
+                    appendSegment(currentNode, 0, remaining_hole);
                 }
 
-                
                 if (currentSegment->prev) {
                     currentSegment->prev->next = currentSegment->next;
                 } else {
@@ -168,27 +175,37 @@ void* mems_malloc(size_t size) {
                     currentSegment->next->prev = currentSegment->prev;
                 }
 
-                
-                createSegment(currentNode, 1, total_size);
+                memsVirtualAddress = (void*)memsVirtualOffset;
+                appendSegment(currentNode, 1, total_size);
 
-                return currentSegment->mainNode->segment;
+                memsVirtualOffset += total_size;
+
+                return memsVirtualAddress;
             }
 
             currentSegment = currentSegment->next;
         }
 
         if (currentNode->next == NULL) {
-            
-            currentNode->next = createNode(size);
+            currentNode->next = createNode(total_size);
             currentNode->next->prev = currentNode;
-            return currentNode->next->segment;
+
+            memsVirtualAddress = (void*)memsVirtualOffset;
+            memsVirtualOffset += total_size;
+
+            appendSegment(currentNode, 1, total_size);
+
+            return memsVirtualAddress;
         }
 
         currentNode = currentNode->next;
     }
-
-    return NULL; 
+    return memsVirtualAddress;
 }
+
+
+
+
 
 
 /*
