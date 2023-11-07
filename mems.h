@@ -1,5 +1,4 @@
-/*
-All the main functions with respect to the MeMS are inplemented here
+/*All the main functions with respect to the MeMS are inplemented here
 read the function discription for more details
 
 NOTE: DO NOT CHANGE THE NAME OR SIGNATURE OF FUNCTIONS ALREADY PROVIDED
@@ -13,6 +12,8 @@ REFER DOCUMENTATION FOR MORE DETAILS ON FUNSTIONS AND THEIR FUNCTIONALITY
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <stdint.h>
+
 
 /*
 Use this macro where ever you need PAGE_SIZE.
@@ -64,6 +65,7 @@ void appendNode(int size) {
         mainChain->head = newNode;
     } else {
         struct Node* current = mainChain->head;
+
         while (current->next) {
             current = current->next;
         }
@@ -89,6 +91,7 @@ void appendSegment(struct Node* node, int type, int size) {
         node->segment = newSegment;
     } else {
         struct Segment* current = node->segment;
+
         while (current->next) {
             current = current->next;
         }
@@ -106,8 +109,7 @@ Input Parameter: Nothing
 Returns: Nothing
 */
 void mems_init(){
-
-	mainChain = (struct MainChain*)mmap(NULL, sizeof(struct MainChain), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mainChain = (struct MainChain*)mmap(NULL, sizeof(struct MainChain), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (mainChain == MAP_FAILED) {
         perror("mmap failed");
         exit(1);
@@ -122,8 +124,21 @@ allocated memory using the munmap system call.
 Input Parameter: Nothing
 Returns: Nothing
 */
-void mems_finish(){
-    
+void mems_finish() {
+    struct Node* currentNode = mainChain->head;
+    while (currentNode) {
+        struct Node* nextNode = currentNode->next;
+        struct Segment* currentSegment = currentNode->segment;
+
+        while (currentSegment) {
+            struct Segment* nextSegment = currentSegment->next;
+            munmap(currentSegment, sizeof(struct Segment));
+            currentSegment = nextSegment;
+        }
+        munmap(currentNode, sizeof(struct Node));
+        currentNode = nextNode;
+    }
+    munmap(mainChain, sizeof(struct MainChain));
 }
 
 
@@ -141,16 +156,16 @@ Returns: MeMS Virtual address (that is created by MeMS)
 */ 
 
 void* mems_malloc(size_t size) {
-    void* memsVirtualAddress = NULL;
-    size_t total_size = size;
+    uintptr_t memsVirtualAddress = 0;
+    size_t total_size = size * PAGE_SIZE;
 
     if (mainChain->head == NULL) {
         mainChain->head = createNode(total_size);
         appendSegment(mainChain->head, 0, total_size);
-        memsVirtualAddress = (void*)memsVirtualOffset;
         memsVirtualOffset += total_size;
+        memsVirtualAddress = (uintptr_t)memsVirtualOffset;
         appendSegment(mainChain->head, 1, total_size);
-        return memsVirtualAddress;
+        return (void*)(memsVirtualAddress / 4096);
     }
 
     struct Node* currentNode = mainChain->head;
@@ -175,12 +190,11 @@ void* mems_malloc(size_t size) {
                     currentSegment->next->prev = currentSegment->prev;
                 }
 
-                memsVirtualAddress = (void*)memsVirtualOffset;
+                memsVirtualOffset += total_size;
+                memsVirtualAddress = (uintptr_t)memsVirtualOffset;
                 appendSegment(currentNode, 1, total_size);
 
-                memsVirtualOffset += total_size;
-
-                return memsVirtualAddress;
+                return (void*)(memsVirtualAddress / 4096);
             }
 
             currentSegment = currentSegment->next;
@@ -190,21 +204,18 @@ void* mems_malloc(size_t size) {
             currentNode->next = createNode(total_size);
             currentNode->next->prev = currentNode;
 
-            memsVirtualAddress = (void*)memsVirtualOffset;
             memsVirtualOffset += total_size;
-
+            memsVirtualAddress = (uintptr_t)memsVirtualOffset;
             appendSegment(currentNode, 1, total_size);
 
-            return memsVirtualAddress;
+            return (void*)(memsVirtualAddress / 4096);
         }
 
         currentNode = currentNode->next;
     }
-    return memsVirtualAddress;
+    
+    return (void*)(memsVirtualAddress / 4096);
 }
-
-
-
 
 
 
@@ -216,10 +227,31 @@ this function print the stats of the MeMS system like
 Parameter: Nothing
 Returns: Nothing but should print the necessary information on STDOUT
 */
-void mems_print_stats(){
+void mems_print_stats() {
+    int mainChainLength = 0;
+    int subChainLength = 0;
 
-	
+    struct Node* currentNode = mainChain->head;
 
+    while (currentNode) {
+        mainChainLength++;
+
+        printf("MainChain Node %d -> Size: %d\n", mainChainLength, currentNode->size / 4096);
+
+        struct Segment* currentSegment = currentNode->segment;
+
+        while (currentSegment) {
+            subChainLength++;
+            printf("  Segment Type: %s, Size: %d\n", currentSegment->type == 1 ? "PROCESS" : "HOLE", currentSegment->size / 4096);
+
+            currentSegment = currentSegment->next;
+        }
+
+        currentNode = currentNode->next;
+    }
+
+    printf("MainChain Length: %d\n", mainChainLength);
+    printf("SubChain Length: %d\n", subChainLength);
 }
 
 
@@ -229,6 +261,12 @@ Parameter: MeMS Virtual address (that is created by MeMS)
 Returns: MeMS physical address mapped to the passed ptr (MeMS virtual address).
 */
 void *mems_get(void*v_ptr){
+
+    void *mems_get(void *v_ptr) {
+    uintptr_t memsVirtualAddress = (uintptr_t)v_ptr;
+    uintptr_t memsPhysicalAddress = memsVirtualAddress * PAGE_SIZE;
+    return (void*)memsPhysicalAddress;
+}
     
 }
 
@@ -238,6 +276,39 @@ this function free up the memory pointed by our virtual_address and add it to th
 Parameter: MeMS Virtual address (that is created by MeMS) 
 Returns: nothing
 */
-void mems_free(void *v_ptr){
-    
+
+void mems_free(void *v_ptr) {
+
+    struct Node* currentNode = mainChain->head;
+    while (currentNode) {
+        struct Segment* currentSegment = currentNode->segment;
+
+        while (currentSegment) {
+            if (v_ptr >= (void*)currentSegment && v_ptr < (void*)((char*)currentSegment + currentSegment->size)) {
+                currentSegment->type = 0;
+
+                if (currentSegment->prev && currentSegment->prev->type == 0) {
+                    currentSegment->prev->size += currentSegment->size;
+                    if (currentSegment->next) {
+                        currentSegment->next->prev = currentSegment->prev;
+                    }
+                    currentSegment->prev->next = currentSegment->next;
+                    munmap(currentSegment, sizeof(struct Segment));
+                    currentSegment = currentSegment->prev;
+                }
+
+                if (currentSegment->next && currentSegment->next->type == 0) {
+                    currentSegment->size += currentSegment->next->size;
+                    if (currentSegment->next->next) {
+                        currentSegment->next->next->prev = currentSegment;
+                    }
+                    currentSegment->next = currentSegment->next->next;
+                    munmap(currentSegment->next, sizeof(struct Segment));
+                }
+                return;
+            }
+            currentSegment = currentSegment->next;
+        }
+        currentNode = currentNode->next;
+    }
 }
