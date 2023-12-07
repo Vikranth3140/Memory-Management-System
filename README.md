@@ -1,4 +1,4 @@
-# MeMS: Memory Management System
+# Custom Memory Management System
 [Documentation](https://docs.google.com/document/d/1Gs9kC3187lLrinvK1SueTc8dHCJ0QP43eRlrCRlXiCY/edit?usp=sharing)
 ---
 
